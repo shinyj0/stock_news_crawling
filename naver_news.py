@@ -19,10 +19,11 @@ load_dotenv()
 client_id = os.getenv("CLIENT_ID")
 client_secret = os.getenv("CLIENT_SECRET")
 
-# 주식 예측 관련 한국어 키워드 리스트
+# 주식 예측 관련 기본 한국어 키워드 리스트
 stock_prediction_keywords_kr = [
     "주식", "증권", "투자", "경제", "주가", 
-    "금융"
+    "금융", "시장", "코스피", "코스닥", "배당", 
+    "인플레이션", "금리", "성장", "채권"
 ]
 
 # Okt 형태소 분석기 인스턴스 생성
@@ -38,7 +39,7 @@ def get_naver_news(query, start=1, display=10, sort='sim'):
     response = requests.get(url, headers=headers)
     return response.json()
 
-# 기사 본문 크롤링 함수 (SSL 인증서 검증을 건너뜀 및 재시도 추가)
+# 기사 본문 크롤링 함수
 def get_article_content(url):
     retry_count = 3  # 최대 3번 재시도
     for _ in range(retry_count):
@@ -55,10 +56,14 @@ def get_article_content(url):
             print(f"Unexpected error while crawling {url}: {e}")
     return None
 
-# 기사 본문에서 핵심 키워드를 추출하는 함수 (Okt 사용)
-def extract_keywords(article_content):
+# 핵심 키워드를 추출하고 주식 관련 키워드로 확장하는 함수
+def expand_stock_keywords(article_content):
     nouns = okt.nouns(article_content)  # 명사 추출
-    return list(set(nouns))  # 중복 제거 후 리스트로 반환
+    expanded_keywords = list(set(nouns))  # 중복 제거 후 리스트로 반환
+    
+    # 기존 주식 관련 키워드와 추출한 명사 간의 유사성을 비교하여 확장
+    relevant_keywords = [keyword for keyword in expanded_keywords if keyword in stock_prediction_keywords_kr]
+    return relevant_keywords
 
 # 키워드 확장 및 뉴스 수집 실행 (최대 1000개의 기사만 수집)
 def collect_relevant_stock_news_kr():
@@ -92,8 +97,8 @@ def collect_relevant_stock_news_kr():
                     if not article_content or len(article_content) < 300:  # 본문이 너무 짧은 기사 제외
                         continue
 
-                    # 기사 본문에서 키워드 추출
-                    extracted_keywords = extract_keywords(article_content)
+                    # 기사 본문에서 주식 관련 키워드 확장
+                    expanded_keywords = expand_stock_keywords(article_content)
                     
                     # 기사 데이터 저장
                     news_data.append({
@@ -102,7 +107,7 @@ def collect_relevant_stock_news_kr():
                         'description': description,
                         'content': article_content,
                         'pub_date': pub_date,
-                        'keywords': extracted_keywords  # 추출된 키워드 저장
+                        'keywords': expanded_keywords  # 확장된 키워드 저장
                     })
 
                     collected_articles_count += 1  # 수집된 기사 수 증가
@@ -113,7 +118,7 @@ def collect_relevant_stock_news_kr():
             start += 100  # 다음 페이지로 넘어감
     
     # 결과를 JSON 파일로 저장
-    with open('collected_stock_news_kr_with_keywords.json', 'w', encoding='utf-8') as f:
+    with open('collected_stock_news_kr_with_expanded_keywords.json', 'w', encoding='utf-8') as f:
         json.dump(news_data, f, ensure_ascii=False, indent=4)
 
     print(f"{collected_articles_count} relevant articles collected.")
