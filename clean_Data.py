@@ -1,12 +1,15 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-import hashlib
 import json
 import re
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from dotenv import load_dotenv
+import time
 import urllib3
-from konlpy.tag import Okt
 
 # SSL 경고 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -49,45 +52,64 @@ def get_naver_news(query, start=1, display=10, sort='sim'):
     response = requests.get(url, headers=headers)
     return response.json()
 
-# 기사 본문 크롤링 함수
-# 기사 본문 크롤링 함수
-def get_article_content(url):
+# Selenium 크롤링 함수
+def get_article_content_dynamic(url):
     """
-    기사 URL에서 제목과 본문을 크롤링합니다.
+    Selenium을 이용하여 기사 URL에서 제목과 본문을 크롤링합니다.
     """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    # ChromeDriver 경로 설정
+    driver_path = r"C:\Users\yejin\Downloads\chromedriver-win64(130.0.6723.31)\chromedriver-win64\chromedriver.exe"  # 올바른 경로 설정
+    
+    # Chrome 옵션 설정
+    options = Options()
+    options.add_argument("--headless")  # 브라우저 창을 표시하지 않음
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920x1080")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+    # WebDriver 초기화
+    service = Service(driver_path)
+    driver = webdriver.Chrome(service=service, options=options)
+
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = response.apparent_encoding
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # URL 접속
+        driver.get(url)
+        
+        # 크롤링 대기 시간
+        driver.implicitly_wait(3)
 
-        # 제목 추출
-        title_tag = soup.select_one('div#ct > div.media_end_head.go_trans > div.media_end_head_title > h2')
-        title = title_tag.get_text(strip=True) if title_tag else "No Title Found"
+        # 제목 크롤링
+        try:
+            title_element = driver.find_element(By.CSS_SELECTOR, 'div#ct > div.media_end_head.go_trans > div.media_end_head_title > h2')
+            title = title_element.text.strip()
+        except:
+            title = "No Title Found"
 
-        # 본문 추출 (여러 태그 시도)
-        content_div = soup.find('div', {'id': 'dic_area'})  # 기본 본문 태그
-        if not content_div:  # 다른 구조의 본문 처리
-            content_div = soup.find('div', {'id': 'articleBodyContents'})  # 예비 태그
-
-        content = content_div.get_text(separator=" ").strip() if content_div else "No Content Found"
+        # 본문 크롤링
+        try:
+            content_element = driver.find_element(By.CSS_SELECTOR, 'div#dic_area')  # 기본 본문 태그
+            content = content_element.text.strip()
+        except:
+            content = "No Content Found"
 
         return {
             'title': clean_text(title),
             'content': clean_text(content)
         }
     except Exception as e:
-        # 실패한 URL 로그 기록
-        with open('failed_urls.log', 'a', encoding='utf-8') as log_file:
-            log_file.write(f"Failed to crawl: {url}\nError: {e}\n")
-        print(f"Error crawling {url}: {e}")
+        print(f"Error during Selenium crawling: {e}")
         return None
+    finally:
+        # WebDriver 종료
+        driver.quit()
 
 # 뉴스 데이터 수집 및 저장 함수
-def collect_relevant_stock_news_kr():
-    json_file = 'again.json'  # JSON 파일 이름
+def collect_relevant_stock_news_kr_with_selenium():
+    json_file = 'stock_news.json'  # JSON 파일 이름
     articles = set()  # 중복 확인을 위한 링크 저장
 
     # JSON 파일 초기화
@@ -98,10 +120,13 @@ def collect_relevant_stock_news_kr():
     else:
         existing_data = []
 
+    # 기존 데이터의 마지막 번호 계산
+    start_index = len(existing_data) + 1
+
     for keyword in stock_prediction_keywords_kr:
         print(f"Processing keyword: {keyword}")
         news_result = get_naver_news(keyword, start=1, display=10, sort='sim')
-        
+
         if not news_result.get('items'):
             print(f"No articles found for keyword: {keyword}")
             continue
@@ -112,12 +137,13 @@ def collect_relevant_stock_news_kr():
                 print(f"Skipping duplicate article: {link}")
                 continue
 
-            article_data = get_article_content(link)
+            article_data = get_article_content_dynamic(link)
             if not article_data or article_data['content'] == "No Content Found":
                 print(f"Failed to crawl content for link: {link}")
                 continue
 
             new_article = {
+                'id': start_index,  # 뉴스 번호 추가
                 'keyword': keyword,
                 'title': article_data['title'],
                 'content': article_data['content'],
@@ -126,13 +152,18 @@ def collect_relevant_stock_news_kr():
                 'pub_date': item['pubDate']
             }
 
+            # 순서 번호 증가
+            start_index += 1
+
             # 실시간으로 파일 업데이트
             existing_data.append(new_article)
             articles.add(link)  # 중복 확인을 위해 링크 저장
             with open(json_file, 'w', encoding='utf-8') as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=4)
 
-            print(f"Saved article: {new_article['title']}")
+            print(f"Saved article: {new_article['title']} with ID: {new_article['id']}")
 
 # 실행
-collect_relevant_stock_news_kr()
+collect_relevant_stock_news_kr_with_selenium()
+
+
