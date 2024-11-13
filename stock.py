@@ -17,10 +17,10 @@ client_secret = os.getenv("CLIENT_SECRET")
 stock_prediction_keywords_kr = [
     "주식", "증권", "투자", "경제", "주가",
     "금융", "시장", "코스피", "코스닥", "배당",
-    "인플레이션", "금리", "성장", "채권", "분석",
-    "상장", "매도", "매수", "공매도", "IPO", "유동성",
-    "ETF", "기업", "실적", "재무", "수익률", "차트",
-    "포트폴리오", "리스크", "리밸런싱", "배당금"
+    "인플레이션", "금리", "채권", "경제성장","RSI "
+    "경제", "매도", "매수", "공매도", "IPO", "주주"
+    "ETF", "기업", "실적", "재무", "수익률", "펀드"
+    "비트코인", "리밸런싱", "배당금", "종합주가지수", ""
 ]
 
 # 텍스트 정제 함수
@@ -56,22 +56,33 @@ def get_article_content(url):
     soup = BeautifulSoup(html, "html.parser")
     
     # 제목과 본문 추출
+    title = "No Title Found"
+    content = "No Content Found"
+
     try:
-        title = soup.select_one('#title_area').get_text(strip=True)
+        title_tag = soup.select_one('#title_area')
+        if title_tag:
+            title = title_tag.get_text(strip=True)
     except:
-        title = "No Title Found"
+        pass
     
     try:
-        content = soup.select_one('#dic_area').get_text(strip=True)
+        content_tag = soup.select_one('#dic_area')
+        if content_tag:
+            content = content_tag.get_text(strip=True)
     except:
-        content = "No Content Found"
-    
+        pass
+
+    # 제목과 본문이 유효한 경우만 반환
+    if title == "No Title Found" or content == "No Content Found":
+        return None
+
     return {
         "title": clean_text(title),
         "content": clean_text(content)
     }
 
-# JSON 저장 함수
+# JSON 실시간 저장 함수
 def save_to_json_file(data, filename="yejin.json"):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as file:
@@ -79,14 +90,25 @@ def save_to_json_file(data, filename="yejin.json"):
     else:
         existing_data = []
 
-    # 데이터 추가
+    # 중복 링크 제거
+    existing_links = {item['link'] for item in existing_data}
+    if data['link'] in existing_links:
+        print(f"Duplicate article skipped: {data['title']}")
+        return
+
+    # 순번 추가
+    data['id'] = len(existing_data) + 1
+
+    # 기존 데이터에 추가
     existing_data.append(data)
 
     # 파일 저장
     with open(filename, "w", encoding="utf-8") as file:
         json.dump(existing_data, file, ensure_ascii=False, indent=4)
 
-# 뉴스 크롤링 및 저장
+    print(f"Article saved: {data['title']}")
+
+# 뉴스 크롤링 및 실시간 저장
 def crawl_and_save_news():
     for keyword in stock_prediction_keywords_kr:
         print(f"Processing keyword: {keyword}")
@@ -101,6 +123,7 @@ def crawl_and_save_news():
             article_data = get_article_content(article_url)
 
             if not article_data:
+                print(f"Skipping article with no valid title or content: {article_url}")
                 continue
             
             # 저장할 데이터 구조
@@ -112,8 +135,8 @@ def crawl_and_save_news():
                 "pub_date": item.get("pubDate", "Unknown Date")
             }
             
+            # 실시간 저장
             save_to_json_file(news_item)
-            print(f"Saved article: {news_item['title']}")
             
             # 서버 부담 방지
             time.sleep(0.5)
