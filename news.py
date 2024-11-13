@@ -13,7 +13,7 @@ load_dotenv()
 client_id = os.getenv("CLIENT_ID")
 client_secret = os.getenv("CLIENT_SECRET")
 
-# 네이버 API 요청 함수 [CODE 1]
+# 네이버 API 요청 함수 
 def getRequestUrl(url):
     req = urllib.request.Request(url)
     req.add_header("X-Naver-Client-Id", client_id)
